@@ -35,6 +35,7 @@
       <td>{{ t.numbers | join(", ") }}</td>
       <td>{{ t.allowed | join(", ") if t.allowed else "any" }}</td>
       <td>
+        <a href="/trunks/{{ t.id }}/edit">Edit</a>
         <form method="post" action="/trunks/{{ t.id }}/delete" class="inline" onsubmit="return confirm('Delete this trunk?');">
           <button class="danger" type="submit">Delete</button>
         </form>

@@ -130,14 +130,45 @@ async def fetch_rules() -> list[dict]:
     async with lk_client() as lk:
         res = await lk.sip.list_dispatch_rule(api.ListSIPDispatchRuleRequest())
     return [
-        {"id": r.sip_dispatch_rule_id, "name": r.name, "agents": [a.agent_name for a in r.room_config.agents]}
+        {
+            "id": r.sip_dispatch_rule_id,
+            "name": r.name,
+            "agents": [a.agent_name for a in r.room_config.agents],
+            "trunk_ids": list(r.trunk_ids),
+            "prefix": r.rule.dispatch_rule_individual.room_prefix if r.rule.HasField("dispatch_rule_individual") else "",
+        }
         for r in res.items
     ]
 
 
+async def fetch_trunk(trunk_id: str) -> dict | None:
+    trunks = await fetch_trunks()
+    return next((t for t in trunks if t["id"] == trunk_id), None)
+
+
+async def fetch_rule(rule_id: str) -> dict | None:
+    rules = await fetch_rules()
+    return next((r for r in rules if r["id"] == rule_id), None)
+
+
+def describe_trunks(rule: dict, trunks: list[dict]) -> str:
+    """Human-readable list of the trunks a rule applies to."""
+    if not rule["trunk_ids"]:
+        return "All trunks"
+    names = {t["id"]: f"{t['name']} ({', '.join(t['numbers'])})" for t in trunks}
+    return ", ".join(names.get(tid, tid) for tid in rule["trunk_ids"])
+
+
 def friendly_error(exc: Exception) -> str:
-    """Return LiveKit's own message when there is one, otherwise the exception text."""
+    """Return LiveKit's message, with a plain explanation for the errors people hit most."""
     message = getattr(exc, "message", None) or str(exc)
+    if "already exists" in message and "dispatch rule" in message:
+        return (
+            "Another dispatch rule already covers this trunk, number, and PIN. "
+            "Only one rule can apply to all trunks, and a rule can't use the same trunk as another. "
+            "Change the trunks on this rule, or delete the existing one first. "
+            f"LiveKit said: {message}"
+        )
     return message or exc.__class__.__name__
 
 
@@ -157,6 +188,24 @@ async def lk_action(request: Request, back: str, action, success: str) -> Redire
     except Exception as exc:
         request.session["flash"] = {"kind": "error", "text": friendly_error(exc)}
     return RedirectResponse(back, status_code=303)
+
+
+def list_update(current: list[str], new: list[str]) -> api.ListUpdate | None:
+    """Change a list field from current to new, sending only what LiveKit accepts.
+
+    Returns None when nothing changed, so the field is left alone. LiveKit rejects
+    an empty update, and 'set' with an empty list. Emptying a list is done with 'remove'.
+    """
+    add = [v for v in new if v not in current]
+    remove = [v for v in current if v not in new]
+    if not add and not remove:
+        return None
+    if add and not remove:
+        return api.ListUpdate(add=add)
+    if remove and not add:
+        return api.ListUpdate(remove=remove)
+    # Both adding and removing: the server accepts one operation per update, so replace the whole list
+    return api.ListUpdate(set=new)
 
 
 def take_flash(request: Request) -> dict | None:
@@ -222,25 +271,95 @@ async def delete_trunk(request: Request, trunk_id: str):
     return await lk_action(request, "/trunks", action, "Trunk deleted.")
 
 
+@app.get("/trunks/{trunk_id}/edit", response_class=HTMLResponse)
+async def trunk_edit_page(request: Request, trunk_id: str):
+    require_login(request)
+    trunk = await fetch_trunk(trunk_id)
+    if trunk is None:
+        request.session["flash"] = {"kind": "error", "text": "That trunk no longer exists."}
+        return RedirectResponse("/trunks", status_code=303)
+    return templates.TemplateResponse(request, "trunk_edit.html", {"trunk": trunk, "user": request.session["user"]})
+
+
+@app.post("/trunks/{trunk_id}/edit")
+async def update_trunk(
+    request: Request,
+    trunk_id: str,
+    name: str = Form(...),
+    number: str = Form(...),
+    allowed: str = Form(""),
+):
+    require_login(request)
+    number = number.strip()
+    allowed_list = [a.strip() for a in allowed.split(",") if a.strip()]
+    existing = await fetch_trunk(trunk_id)
+    current_numbers = existing["numbers"] if existing else []
+    current_allowed = existing["allowed"] if existing else []
+
+    async def action():
+        async with lk_client() as lk:
+            await lk.sip.update_inbound_trunk_fields(
+                trunk_id,
+                name=name.strip(),
+                numbers=list_update(current_numbers, [number]),
+                allowed_addresses=list_update(current_allowed, allowed_list),
+            )
+
+    return await lk_action(request, "/trunks", action, "Trunk updated. The change applies to new calls.")
+
+
+async def rules_context(request: Request) -> dict:
+    trunks, trunk_error = await safe_fetch(fetch_trunks)
+    rules, rule_error = await safe_fetch(fetch_rules)
+    # Rules with no trunk apply to every trunk, so they overlap with every other rule.
+    overlap = len(rules) > 1 and any(not r["trunk_ids"] for r in rules)
+    return {
+        "rules": rules,
+        "trunks": trunks,
+        "error": rule_error or trunk_error,
+        "overlap_warning": overlap,
+        "user": request.session["user"],
+    }
+
+
 @app.get("/rules", response_class=HTMLResponse)
 async def rules_page(request: Request):
     require_login(request)
-    rules, error = await safe_fetch(fetch_rules)
+    context = await rules_context(request)
+    context["describe"] = lambda rule: describe_trunks(rule, context["trunks"])
+    return templates.TemplateResponse(request, "rules.html", context)
+
+
+@app.get("/rules/{rule_id}/edit", response_class=HTMLResponse)
+async def rule_edit_page(request: Request, rule_id: str):
+    require_login(request)
+    rule = await fetch_rule(rule_id)
+    trunks, error = await safe_fetch(fetch_trunks)
+    if rule is None:
+        request.session["flash"] = {"kind": "error", "text": "That rule no longer exists."}
+        return RedirectResponse("/rules", status_code=303)
     return templates.TemplateResponse(
-        request, "rules.html", {"rules": rules, "error": error, "user": request.session["user"]}
+        request, "rule_edit.html", {"rule": rule, "trunks": trunks, "error": error, "user": request.session["user"]}
     )
 
 
 @app.post("/rules")
-async def create_rule(request: Request, name: str = Form(...), room_prefix: str = Form(ROOM_PREFIX)):
+async def create_rule(
+    request: Request,
+    name: str = Form(...),
+    room_prefix: str = Form(ROOM_PREFIX),
+    trunk_ids: list[str] = Form([]),
+):
     require_login(request)
     prefix = room_prefix.strip() or ROOM_PREFIX
+    selected = [t for t in trunk_ids if t]
 
     async def action():
         async with lk_client() as lk:
             await lk.sip.create_dispatch_rule(
                 api.CreateSIPDispatchRuleRequest(
                     name=name.strip(),
+                    trunk_ids=selected,
                     rule=api.SIPDispatchRule(
                         dispatch_rule_individual=api.SIPDispatchRuleIndividual(room_prefix=prefix),
                     ),
@@ -248,7 +367,36 @@ async def create_rule(request: Request, name: str = Form(...), room_prefix: str 
                 )
             )
 
-    return await lk_action(request, "/rules", action, "Dispatch rule created.")
+    scope = f"{len(selected)} trunk(s)" if selected else "all trunks"
+    return await lk_action(request, "/rules", action, f"Dispatch rule created for {scope}.")
+
+
+@app.post("/rules/{rule_id}/edit")
+async def update_rule(
+    request: Request,
+    rule_id: str,
+    name: str = Form(...),
+    room_prefix: str = Form(ROOM_PREFIX),
+    trunk_ids: list[str] = Form([]),
+):
+    require_login(request)
+    prefix = room_prefix.strip() or ROOM_PREFIX
+    selected = [t for t in trunk_ids if t]
+    existing = await fetch_rule(rule_id)
+    current = existing["trunk_ids"] if existing else []
+
+    async def action():
+        async with lk_client() as lk:
+            await lk.sip.update_dispatch_rule_fields(
+                rule_id,
+                name=name.strip(),
+                trunk_ids=list_update(current, selected),
+                rule=api.SIPDispatchRule(
+                    dispatch_rule_individual=api.SIPDispatchRuleIndividual(room_prefix=prefix),
+                ),
+            )
+
+    return await lk_action(request, "/rules", action, "Dispatch rule updated.")
 
 
 @app.post("/rules/{rule_id}/delete")

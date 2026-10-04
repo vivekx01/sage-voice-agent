@@ -1,11 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Dispatch rules</h1>
-{% if error %}<div class="notice error">Could not load dispatch rules: {{ error }}</div>{% endif %}
+{% if error %}<div class="notice error">Could not load: {{ error }}</div>{% endif %}
+{% if overlap_warning %}
+<div class="notice error">
+  At least one rule applies to all trunks while other rules exist. A call can match more than one rule.
+  Attach each rule to a specific trunk to avoid this.
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>How rules are chosen</h2>
+  <p class="hint">
+    An incoming call is accepted by a trunk first. Then only the rules attached to that trunk are considered.
+    A rule with no trunk selected applies to every trunk. Each call gets its own room, named with the room prefix
+    plus a unique ID, and the agent joins that room.
+  </p>
+</div>
 
 <div class="card">
   <h2>Add a rule</h2>
-  <p class="hint">Each incoming call gets its own room, and the Sage agent joins it.</p>
   <form method="post" action="/rules">
     <div class="row">
       <div>
@@ -15,8 +29,23 @@
       <div>
         <label for="room_prefix">Room prefix</label>
         <input id="room_prefix" name="room_prefix" value="call-" required>
+        <div class="hint">The start of each room's name. A unique ID is added after it.</div>
       </div>
     </div>
+
+    <label>Trunks this rule applies to</label>
+    {% if trunks %}
+      {% for t in trunks %}
+      <label style="font-weight:400;display:flex;gap:8px;align-items:center;margin:6px 0;">
+        <input type="checkbox" name="trunk_ids" value="{{ t.id }}" style="width:auto;">
+        {{ t.name }} ({{ t.numbers | join(", ") }})
+      </label>
+      {% endfor %}
+      <div class="hint">Leave all unchecked to apply this rule to every trunk.</div>
+    {% else %}
+      <p class="hint">No trunks yet. Create a trunk first, or leave this empty to apply to all trunks.</p>
+    {% endif %}
+
     <p><button type="submit">Create rule</button></p>
   </form>
 </div>
@@ -25,12 +54,15 @@
   <h2>Existing rules</h2>
   {% if rules %}
   <table>
-    <tr><th>Name</th><th>Agents</th><th></th></tr>
+    <tr><th>Name</th><th>Trunks</th><th>Prefix</th><th>Agent</th><th></th></tr>
     {% for r in rules %}
     <tr>
       <td>{{ r.name }}<div class="hint">{{ r.id }}</div></td>
+      <td>{{ describe(r) }}</td>
+      <td>{{ r.prefix or "-" }}</td>
       <td>{{ r.agents | join(", ") }}</td>
       <td>
+        <a href="/rules/{{ r.id }}/edit">Edit</a>
         <form method="post" action="/rules/{{ r.id }}/delete" class="inline" onsubmit="return confirm('Delete this rule?');">
           <button class="danger" type="submit">Delete</button>
         </form>

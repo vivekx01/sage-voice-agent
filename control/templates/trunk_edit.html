@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Edit trunk</h1>
+
+<div class="card">
+  <p class="hint">Changes apply to new calls. Calls already in progress keep their current settings.</p>
+  <form method="post" action="/trunks/{{ trunk.id }}/edit">
+    <div class="row">
+      <div>
+        <label for="name">Name</label>
+        <input id="name" name="name" value="{{ trunk.name }}" required>
+      </div>
+      <div>
+        <label for="number">Phone number</label>
+        <input id="number" name="number" value="{{ trunk.numbers[0] if trunk.numbers else '' }}" required>
+        <div class="hint">E.164 format, such as +15551234567.</div>
+      </div>
+    </div>
+    <label for="allowed">Allowed addresses</label>
+    <input id="allowed" name="allowed" value="{{ trunk.allowed | join(', ') }}">
+    <div class="hint">Comma-separated IPs or ranges. Leave empty to accept calls from any address.</div>
+    <p><button type="submit">Save trunk</button> <a href="/trunks">Cancel</a></p>
+  </form>
+</div>
+{% endblock %}
