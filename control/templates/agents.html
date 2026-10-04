@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Agents</h1>
+<p class="hint">
+  Each agent has its own settings. An agent name must match the name the agent registers with,
+  and rules dispatch calls to that name. Creating an agent here doesn't start it.
+</p>
+
+<div class="card">
+  <h2>Add an agent</h2>
+  <form method="post" action="/agents">
+    <label for="name">Agent name</label>
+    <input id="name" name="name" placeholder="sage2" required>
+    <div class="hint">Lowercase letters, numbers, - and _. Must match the agent's registered name.</div>
+    <p><button type="submit">Create and open settings</button></p>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Existing agents</h2>
+  {% if agents %}
+  <table>
+    <tr><th>Agent</th><th></th></tr>
+    {% for a in agents %}
+    <tr>
+      <td><a href="/agents/{{ a }}/settings">{{ a }}</a></td>
+      <td>
+        <a href="/agents/{{ a }}/settings">Settings</a>
+        <form method="post" action="/agents/{{ a }}/delete" class="inline" onsubmit="return confirm('Delete the saved settings for {{ a }}? Rules are not changed.');">
+          <button class="danger" type="submit">Delete settings</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="hint">No agents yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

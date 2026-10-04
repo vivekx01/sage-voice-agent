@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Agent settings</h1>
+<h1>Settings for {{ agent }}</h1>
+<p class="hint"><a href="/agents">All agents</a></p>
 
 {% if saved %}<div class="notice">Saved. New calls use these settings. Calls already in progress keep their current settings.</div>{% endif %}
 
 <div class="card">
-  <form method="post" action="/settings">
+  <form method="post" action="/agents/{{ agent }}/settings">
     <label for="greeting">Greeting</label>
     <input id="greeting" name="greeting" value="{{ settings.greeting }}" required>
     <div class="hint">What Sage says first when a caller connects.</div>

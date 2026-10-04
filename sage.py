@@ -28,13 +28,17 @@ DEFAULT_SETTINGS = {
 }
 
 
+AGENT_NAME = "sage"
+
+
 def fetch_settings() -> dict:
-    """Read Sage's settings from the control app. Falls back to defaults on any failure."""
-    url = os.environ.get("SETTINGS_URL")
+    """Read this agent's settings from the control panel. Falls back to defaults on any failure."""
+    base = os.environ.get("CONTROL_URL", "").rstrip("/")
     token = os.environ.get("INTERNAL_TOKEN")
-    if not url or not token:
-        logger.info("control app not configured, using default settings")
+    if not base or not token:
+        logger.info("control panel not configured, using default settings")
         return dict(DEFAULT_SETTINGS)
+    url = f"{base}/api/internal/agents/{AGENT_NAME}/settings"
     try:
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -53,7 +57,7 @@ class Sage(Agent):
 server = AgentServer()
 
 
-@server.rtc_session(agent_name="sage")
+@server.rtc_session(agent_name=AGENT_NAME)
 async def sage_session(ctx: agents.JobContext):
     # Load settings per call, so changes in the control app apply to the next call.
     settings = await asyncio.to_thread(fetch_settings)

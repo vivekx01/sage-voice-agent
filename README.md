@@ -144,7 +144,7 @@ Then open http://localhost:8000.
 **Sage**
 1. Create a resource from this repo, using the **Dockerfile** build pack and the `/` base directory.
 2. Leave the domain and port mappings empty. Sage only makes outgoing connections.
-3. Set the environment variables from `.env.example`. Add `SETTINGS_URL` and `INTERNAL_TOKEN` if you use the control app.
+3. Set the environment variables from `.env.example`. Add `CONTROL_URL` and `INTERNAL_TOKEN` if you use the control panel.
 
 **Control app**
 1. Create a resource from this repo, using the **Dockerfile** build pack and the `/control` base directory.
@@ -177,7 +177,7 @@ Each call is billed by the providers it uses: the phone carrier, Deepgram, OpenR
 |---|---|
 | Sage doesn't register | The `LIVEKIT_URL` and key pair match the LiveKit server |
 | Calls connect but Sage doesn't answer | A dispatch rule exists (`setup_sip.py list`), and Sage is running |
-| Sage ignores settings changes | `SETTINGS_URL` and `INTERNAL_TOKEN` match the control app. Without them Sage uses its built-in defaults. |
+| Sage ignores settings changes | `CONTROL_URL` and `INTERNAL_TOKEN` match the control panel. Without them Sage uses its built-in defaults. |
 | Control app shows "could not reach the LiveKit server" | `LIVEKIT_URL` and the key pair in the control app are correct |
 | `WRONGPASS` errors on the LiveKit server or SIP service | The Redis password in those services' settings is current |
 

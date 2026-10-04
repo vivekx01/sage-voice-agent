@@ -5,7 +5,9 @@ so the browser never sees it. Settings are stored in SQLite and read by Sage
 through an internal endpoint, authenticated with a separate token.
 """
 
+import logging
 import os
+import re
 import secrets
 import sqlite3
 from contextlib import contextmanager
@@ -19,6 +21,8 @@ from livekit import api
 from starlette.middleware.sessions import SessionMiddleware
 
 load_dotenv()
+
+logger = logging.getLogger("control")
 
 HERE = Path(__file__).parent
 DB_PATH = Path(os.environ.get("DB_PATH", HERE / "data" / "control.db"))
@@ -46,12 +50,21 @@ templates = Jinja2Templates(directory=HERE / "templates")
 
 # ---------- database ----------
 
+AGENT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
 def init_db() -> None:
+    """Create the per-agent settings table. Copies the old single-agent settings to 'sage' once."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with db() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        for key, value in DEFAULT_SETTINGS.items():
-            conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS agent_settings ("
+            " agent TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (agent, key))"
+        )
+        legacy = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'").fetchone()
+        has_rows = conn.execute("SELECT 1 FROM agent_settings LIMIT 1").fetchone()
+        if legacy and not has_rows:
+            conn.execute("INSERT OR IGNORE INTO agent_settings (agent, key, value) SELECT 'sage', key, value FROM settings")
 
 
 @contextmanager
@@ -64,12 +77,37 @@ def db():
         conn.close()
 
 
-def load_settings() -> dict:
+def valid_agent_name(name: str) -> bool:
+    return bool(AGENT_NAME_PATTERN.match(name))
+
+
+def agent_exists(agent: str) -> bool:
     with db() as conn:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        return conn.execute("SELECT 1 FROM agent_settings WHERE agent = ? LIMIT 1", (agent,)).fetchone() is not None
+
+
+def list_agents() -> list[str]:
+    with db() as conn:
+        rows = conn.execute("SELECT DISTINCT agent FROM agent_settings ORDER BY agent").fetchall()
+    return [r[0] for r in rows]
+
+
+def load_settings(agent: str) -> dict:
+    """Defaults, overridden by whatever is saved for this agent."""
+    with db() as conn:
+        rows = conn.execute("SELECT key, value FROM agent_settings WHERE agent = ?", (agent,)).fetchall()
     settings = dict(DEFAULT_SETTINGS)
     settings.update({k: v for k, v in rows})
     return settings
+
+
+def save_settings_for(agent: str, values: dict) -> None:
+    with db() as conn:
+        for key, value in values.items():
+            conn.execute(
+                "INSERT OR REPLACE INTO agent_settings (agent, key, value) VALUES (?, ?, ?)",
+                (agent, key, value),
+            )
 
 
 init_db()
@@ -443,19 +481,65 @@ async def delete_rule(request: Request, rule_id: str):
     return await lk_action(request, "/rules", action, "Dispatch rule deleted.")
 
 
-@app.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request):
+@app.get("/agents", response_class=HTMLResponse)
+def agents_page(request: Request):
     require_login(request)
     return templates.TemplateResponse(
         request,
-        "settings.html",
-        {"settings": load_settings(), "defaults": DEFAULT_SETTINGS, "user": request.session["user"], "saved": request.query_params.get("saved")},
+        "agents.html",
+        {"agents": list_agents(), "user": request.session["user"]},
     )
 
 
-@app.post("/settings")
-def save_settings(
+@app.post("/agents")
+def create_agent(request: Request, name: str = Form(...)):
+    require_login(request)
+    name = name.strip()
+    if not valid_agent_name(name):
+        request.session["flash"] = {
+            "kind": "error",
+            "text": "Agent names use lowercase letters, numbers, - and _, and must start with a letter or number.",
+        }
+        return RedirectResponse("/agents", status_code=303)
+    if not agent_exists(name):
+        save_settings_for(name, dict(DEFAULT_SETTINGS))
+    return RedirectResponse(f"/agents/{name}/settings", status_code=303)
+
+
+@app.post("/agents/{agent}/delete")
+def delete_agent(request: Request, agent: str):
+    require_login(request)
+    with db() as conn:
+        conn.execute("DELETE FROM agent_settings WHERE agent = ?", (agent,))
+    request.session["flash"] = {
+        "kind": "ok",
+        "text": f"Settings for {agent} deleted. Rules that dispatch this agent are not changed.",
+    }
+    return RedirectResponse("/agents", status_code=303)
+
+
+@app.get("/agents/{agent}/settings", response_class=HTMLResponse)
+def agent_settings_page(request: Request, agent: str):
+    require_login(request)
+    if not agent_exists(agent):
+        request.session["flash"] = {"kind": "error", "text": f"No settings found for {agent}. Create it first."}
+        return RedirectResponse("/agents", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "agent": agent,
+            "settings": load_settings(agent),
+            "defaults": DEFAULT_SETTINGS,
+            "user": request.session["user"],
+        },
+    )
+
+
+@app.post("/agents/{agent}/settings")
+def save_agent_settings(
     request: Request,
+    agent: str,
     greeting: str = Form(...),
     instructions: str = Form(...),
     llm_model: str = Form(...),
@@ -464,6 +548,8 @@ def save_settings(
     stt_model: str = Form(...),
 ):
     require_login(request)
+    if not valid_agent_name(agent):
+        raise HTTPException(status_code=404)
     values = {
         "greeting": greeting.strip(),
         "instructions": instructions.strip(),
@@ -472,19 +558,37 @@ def save_settings(
         "tts_voice_id": tts_voice_id.strip(),
         "stt_model": stt_model.strip(),
     }
-    with db() as conn:
-        for key, value in values.items():
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-    return RedirectResponse("/settings?saved=1", status_code=303)
+    save_settings_for(agent, values)
+    request.session["flash"] = {"kind": "ok", "text": f"Settings saved for {agent}. New calls use them."}
+    return RedirectResponse(f"/agents/{agent}/settings", status_code=303)
 
 
-# ---------- internal API for Sage ----------
+# ---------- internal API for agents ----------
 
-@app.get("/api/internal/settings")
-def internal_settings(request: Request):
+def check_internal_token(request: Request) -> JSONResponse | None:
     expected = os.environ.get("INTERNAL_TOKEN", "")
     header = request.headers.get("authorization", "")
     token = header.removeprefix("Bearer ").strip()
     if not expected or not secrets.compare_digest(token, expected):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return load_settings()
+    return None
+
+
+@app.get("/api/internal/agents/{agent}/settings")
+def internal_agent_settings(request: Request, agent: str):
+    denied = check_internal_token(request)
+    if denied:
+        return denied
+    if not agent_exists(agent):
+        # Don't break calls for an agent that has no saved settings yet. Use defaults and say so in the log.
+        logger.warning("no saved settings for agent %r, serving defaults", agent)
+    return load_settings(agent)
+
+
+@app.get("/api/internal/settings")
+def internal_settings_legacy(request: Request):
+    """Kept so the original Sage deployment keeps working. Same as asking for the 'sage' agent."""
+    denied = check_internal_token(request)
+    if denied:
+        return denied
+    return load_settings("sage")
