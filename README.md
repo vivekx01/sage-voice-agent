@@ -2,7 +2,7 @@
 
 Sage is a phone-capable voice agent. Callers reach it through a SIP trunk, LiveKit places each call in a room, and Sage listens, thinks, and talks back in real time.
 
-This repo contains everything needed to run it on your own server: the agent, a small web control app for managing phone routing and Sage's settings, and the scripts that set up the SIP trunk.
+This repo contains everything needed to run it on your own server: the agent, a small web control panel for managing phone routing and each agent's settings, and the scripts that set up the SIP trunk.
 
 ---
 
@@ -25,7 +25,7 @@ LiveKit room (call-…)  ◀──── Sage joins the room (agent: "sage")
 
 - **LiveKit** routes audio between participants in rooms. It doesn't do any AI.
 - **Sage** is the agent. It registers with LiveKit and joins a room when a call arrives.
-- **Control app** is a web UI for trunks, dispatch rules, and Sage's settings. Sage reads its settings from it at the start of each call.
+- **LiveKit control panel** is a web UI for trunks, dispatch rules, and per-agent settings. Each agent reads its own settings from it at the start of each call.
 - **Providers** do the individual jobs: Deepgram for speech-to-text, OpenRouter for the LLM, Fish for text-to-speech, and Silero for detecting speech locally.
 
 ---
@@ -38,7 +38,7 @@ LiveKit room (call-…)  ◀──── Sage joins the room (agent: "sage")
 | `setup_sip.py` | Creates and lists the SIP inbound trunk and dispatch rule through the LiveKit API. |
 | `make_token.py` | Creates a join token for a browser or softphone test. |
 | `Dockerfile` | Builds the Sage container for Coolify or any Docker host. |
-| `control/` | The web control app (FastAPI). See `control/` for its own Dockerfile and settings. |
+| `control/` | The LiveKit control panel (FastAPI). See `control/` for its own Dockerfile and settings. |
 | `.env.example` | Every variable Sage needs, with placeholder values. |
 
 ---
@@ -113,9 +113,9 @@ The SIP service itself runs separately, on your server, with a DNS record for it
 
 ---
 
-## Control app
+## LiveKit control panel
 
-The control app manages trunks, dispatch rules, and Sage's settings from a web browser. It holds the LiveKit key pair on the server, so the browser never sees it.
+The LiveKit control panel manages trunks, dispatch rules, and per-agent settings from a web browser. It holds the LiveKit key pair on the server, so the browser never sees it.
 
 Run it locally:
 
@@ -133,9 +133,9 @@ Then open http://localhost:8000.
 - **Overview:** trunks and dispatch rules from the LiveKit server.
 - **Trunks:** create and delete inbound trunks.
 - **Dispatch rules:** create and delete rules.
-- **Agent settings:** greeting, instructions, and the LLM, speech-to-text, and text-to-speech models. Changes apply to the next call.
+- **Agents:** create an agent name, then open its settings at `/agents/<name>/settings`. Each agent has its own greeting, instructions, and LLM, speech-to-text, and text-to-speech models. Changes apply to the next call.
 
-**Internal endpoint:** `GET /api/internal/settings` returns Sage's settings. It requires `Authorization: Bearer <INTERNAL_TOKEN>`.
+**Internal endpoint:** `GET /api/internal/agents/<name>/settings` returns an agent's settings. It requires `Authorization: Bearer <INTERNAL_TOKEN>`.
 
 ---
 
@@ -146,7 +146,7 @@ Then open http://localhost:8000.
 2. Leave the domain and port mappings empty. Sage only makes outgoing connections.
 3. Set the environment variables from `.env.example`. Add `CONTROL_URL` and `INTERNAL_TOKEN` if you use the control panel.
 
-**Control app**
+**LiveKit control panel**
 1. Create a resource from this repo, using the **Dockerfile** build pack and the `/control` base directory.
 2. Set a domain such as `control.<your-domain>` with HTTPS, and set the port to `8000`.
 3. Add a persistent volume mounted at `/data`.
@@ -158,10 +158,10 @@ Then open http://localhost:8000.
 
 ## Security
 
-- **Never commit secrets.** `.env`, token files, and the control app's database are ignored by `.gitignore`. Keep them out of git and out of chats.
+- **Never commit secrets.** `.env`, token files, and the LiveKit control panel's database are ignored by `.gitignore`. Keep them out of git and out of chats.
 - **Rotate any key or password** that has been shared outside a password manager.
 - **Restrict SIP access.** Set `SIP_ALLOWED_ADDRESSES` to your provider's addresses before using a real phone number. Otherwise anyone who knows the number can reach Sage.
-- **Use a strong login** for the control app, and keep it on HTTPS.
+- **Use a strong login** for the LiveKit control panel, and keep it on HTTPS.
 
 ---
 
@@ -178,7 +178,7 @@ Each call is billed by the providers it uses: the phone carrier, Deepgram, OpenR
 | Sage doesn't register | The `LIVEKIT_URL` and key pair match the LiveKit server |
 | Calls connect but Sage doesn't answer | A dispatch rule exists (`setup_sip.py list`), and Sage is running |
 | Sage ignores settings changes | `CONTROL_URL` and `INTERNAL_TOKEN` match the control panel. Without them Sage uses its built-in defaults. |
-| Control app shows "could not reach the LiveKit server" | `LIVEKIT_URL` and the key pair in the control app are correct |
+| LiveKit control panel shows "could not reach the LiveKit server" | `LIVEKIT_URL` and the key pair in the LiveKit control panel are correct |
 | `WRONGPASS` errors on the LiveKit server or SIP service | The Redis password in those services' settings is current |
 
 ---
