@@ -1,0 +1,16 @@
+# Secrets: never copy these into the image
+.env
+token.txt
+token-vivek.txt
+
+# Local-only files
+.venv
+.git
+__pycache__
+*.pyc
+
+# Not needed inside the Sage container
+setup_sip.py
+make_token.py
+main.py
+README.md
