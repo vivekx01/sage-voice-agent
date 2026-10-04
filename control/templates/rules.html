@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Dispatch rules</h1>
+{% if error %}<div class="notice error">Could not load dispatch rules: {{ error }}</div>{% endif %}
 
 <div class="card">
   <h2>Add a rule</h2>

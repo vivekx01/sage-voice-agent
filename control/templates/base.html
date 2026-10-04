@@ -49,6 +49,10 @@
   </header>
   {% endif %}
   <main>
+    {% set flash = take_flash(request) %}
+    {% if flash %}
+    <div class="notice {% if flash.kind == 'error' %}error{% endif %}">{{ flash.text }}</div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

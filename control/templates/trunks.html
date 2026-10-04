@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Inbound trunks</h1>
+{% if error %}<div class="notice error">Could not load trunks: {{ error }}</div>{% endif %}
 
 <div class="card">
   <h2>Add a trunk</h2>

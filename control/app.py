@@ -135,6 +135,38 @@ async def fetch_rules() -> list[dict]:
     ]
 
 
+def friendly_error(exc: Exception) -> str:
+    """Return LiveKit's own message when there is one, otherwise the exception text."""
+    message = getattr(exc, "message", None) or str(exc)
+    return message or exc.__class__.__name__
+
+
+async def safe_fetch(fetch) -> tuple[list[dict], str | None]:
+    """Run a list call. On failure return an empty list and the message, instead of a 500 page."""
+    try:
+        return await fetch(), None
+    except Exception as exc:
+        return [], friendly_error(exc)
+
+
+async def lk_action(request: Request, back: str, action, success: str) -> RedirectResponse:
+    """Run a LiveKit write. On success or failure, flash a message and go back to the page."""
+    try:
+        await action()
+        request.session["flash"] = {"kind": "ok", "text": success}
+    except Exception as exc:
+        request.session["flash"] = {"kind": "error", "text": friendly_error(exc)}
+    return RedirectResponse(back, status_code=303)
+
+
+def take_flash(request: Request) -> dict | None:
+    """Read and clear the one-time message shown at the top of a page."""
+    return request.session.pop("flash", None)
+
+
+templates.env.globals["take_flash"] = take_flash
+
+
 # ---------- pages ----------
 
 @app.get("/", response_class=HTMLResponse)
@@ -156,58 +188,78 @@ async def home(request: Request):
 @app.get("/trunks", response_class=HTMLResponse)
 async def trunks_page(request: Request):
     require_login(request)
-    return templates.TemplateResponse(request, "trunks.html", {"trunks": await fetch_trunks(), "user": request.session["user"]})
+    trunks, error = await safe_fetch(fetch_trunks)
+    return templates.TemplateResponse(
+        request, "trunks.html", {"trunks": trunks, "error": error, "user": request.session["user"]}
+    )
 
 
 @app.post("/trunks")
 async def create_trunk(request: Request, name: str = Form(...), number: str = Form(...), allowed: str = Form("")):
     require_login(request)
+    number = number.strip()
     allowed_list = [a.strip() for a in allowed.split(",") if a.strip()]
-    async with lk_client() as lk:
-        await lk.sip.create_inbound_trunk(
-            api.CreateSIPInboundTrunkRequest(
-                trunk=api.SIPInboundTrunkInfo(name=name, numbers=[number.strip()], allowed_addresses=allowed_list)
+
+    async def action():
+        async with lk_client() as lk:
+            await lk.sip.create_inbound_trunk(
+                api.CreateSIPInboundTrunkRequest(
+                    trunk=api.SIPInboundTrunkInfo(name=name.strip(), numbers=[number], allowed_addresses=allowed_list)
+                )
             )
-        )
-    return RedirectResponse("/trunks", status_code=303)
+
+    return await lk_action(request, "/trunks", action, f"Trunk created for {number}.")
 
 
 @app.post("/trunks/{trunk_id}/delete")
 async def delete_trunk(request: Request, trunk_id: str):
     require_login(request)
-    async with lk_client() as lk:
-        await lk.sip.delete_trunk(api.DeleteSIPTrunkRequest(sip_trunk_id=trunk_id))
-    return RedirectResponse("/trunks", status_code=303)
+
+    async def action():
+        async with lk_client() as lk:
+            await lk.sip.delete_trunk(api.DeleteSIPTrunkRequest(sip_trunk_id=trunk_id))
+
+    return await lk_action(request, "/trunks", action, "Trunk deleted.")
 
 
 @app.get("/rules", response_class=HTMLResponse)
 async def rules_page(request: Request):
     require_login(request)
-    return templates.TemplateResponse(request, "rules.html", {"rules": await fetch_rules(), "user": request.session["user"]})
+    rules, error = await safe_fetch(fetch_rules)
+    return templates.TemplateResponse(
+        request, "rules.html", {"rules": rules, "error": error, "user": request.session["user"]}
+    )
 
 
 @app.post("/rules")
 async def create_rule(request: Request, name: str = Form(...), room_prefix: str = Form(ROOM_PREFIX)):
     require_login(request)
-    async with lk_client() as lk:
-        await lk.sip.create_dispatch_rule(
-            api.CreateSIPDispatchRuleRequest(
-                name=name,
-                rule=api.SIPDispatchRule(
-                    dispatch_rule_individual=api.SIPDispatchRuleIndividual(room_prefix=room_prefix),
-                ),
-                room_config=api.RoomConfiguration(agents=[api.RoomAgentDispatch(agent_name=AGENT_NAME)]),
+    prefix = room_prefix.strip() or ROOM_PREFIX
+
+    async def action():
+        async with lk_client() as lk:
+            await lk.sip.create_dispatch_rule(
+                api.CreateSIPDispatchRuleRequest(
+                    name=name.strip(),
+                    rule=api.SIPDispatchRule(
+                        dispatch_rule_individual=api.SIPDispatchRuleIndividual(room_prefix=prefix),
+                    ),
+                    room_config=api.RoomConfiguration(agents=[api.RoomAgentDispatch(agent_name=AGENT_NAME)]),
+                )
             )
-        )
-    return RedirectResponse("/rules", status_code=303)
+
+    return await lk_action(request, "/rules", action, "Dispatch rule created.")
 
 
 @app.post("/rules/{rule_id}/delete")
 async def delete_rule(request: Request, rule_id: str):
     require_login(request)
-    async with lk_client() as lk:
-        await lk.sip.delete_dispatch_rule(api.DeleteSIPDispatchRuleRequest(sip_dispatch_rule_id=rule_id))
-    return RedirectResponse("/rules", status_code=303)
+
+    async def action():
+        async with lk_client() as lk:
+            await lk.sip.delete_dispatch_rule(api.DeleteSIPDispatchRuleRequest(sip_dispatch_rule_id=rule_id))
+
+    return await lk_action(request, "/rules", action, "Dispatch rule deleted.")
 
 
 @app.get("/settings", response_class=HTMLResponse)
