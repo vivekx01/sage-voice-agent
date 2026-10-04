@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dispatch rules</h1>
+
+<div class="card">
+  <h2>Add a rule</h2>
+  <p class="hint">Each incoming call gets its own room, and the Sage agent joins it.</p>
+  <form method="post" action="/rules">
+    <div class="row">
+      <div>
+        <label for="name">Name</label>
+        <input id="name" name="name" value="sage-calls" required>
+      </div>
+      <div>
+        <label for="room_prefix">Room prefix</label>
+        <input id="room_prefix" name="room_prefix" value="call-" required>
+      </div>
+    </div>
+    <p><button type="submit">Create rule</button></p>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Existing rules</h2>
+  {% if rules %}
+  <table>
+    <tr><th>Name</th><th>Agents</th><th></th></tr>
+    {% for r in rules %}
+    <tr>
+      <td>{{ r.name }}<div class="hint">{{ r.id }}</div></td>
+      <td>{{ r.agents | join(", ") }}</td>
+      <td>
+        <form method="post" action="/rules/{{ r.id }}/delete" class="inline" onsubmit="return confirm('Delete this rule?');">
+          <button class="danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="hint">No rules yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

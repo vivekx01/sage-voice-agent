@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Agent settings</h1>
+
+{% if saved %}<div class="notice">Saved. New calls use these settings. Calls already in progress keep their current settings.</div>{% endif %}
+
+<div class="card">
+  <form method="post" action="/settings">
+    <label for="greeting">Greeting</label>
+    <input id="greeting" name="greeting" value="{{ settings.greeting }}" required>
+    <div class="hint">What Sage says first when a caller connects.</div>
+
+    <label for="instructions">Instructions</label>
+    <textarea id="instructions" name="instructions" required>{{ settings.instructions }}</textarea>
+    <div class="hint">Sage's personality and rules. Keep replies short, since they're spoken aloud.</div>
+
+    <div class="row">
+      <div>
+        <label for="llm_model">LLM model (OpenRouter)</label>
+        <input id="llm_model" name="llm_model" value="{{ settings.llm_model }}" required>
+        <div class="hint">Example: openai/gpt-4o-mini</div>
+      </div>
+      <div>
+        <label for="stt_model">Speech-to-text model (Deepgram)</label>
+        <input id="stt_model" name="stt_model" value="{{ settings.stt_model }}" required>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="tts_model">Text-to-speech model (Fish)</label>
+        <input id="tts_model" name="tts_model" value="{{ settings.tts_model }}" required>
+        <div class="hint">s2.1-pro-free is the free tier.</div>
+      </div>
+      <div>
+        <label for="tts_voice_id">Voice ID (Fish)</label>
+        <input id="tts_voice_id" name="tts_voice_id" value="{{ settings.tts_voice_id }}" required>
+      </div>
+    </div>
+
+    <p><button type="submit">Save settings</button></p>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Inbound trunks</h1>
+
+<div class="card">
+  <h2>Add a trunk</h2>
+  <form method="post" action="/trunks">
+    <div class="row">
+      <div>
+        <label for="name">Name</label>
+        <input id="name" name="name" value="sage-inbound" required>
+      </div>
+      <div>
+        <label for="number">Phone number</label>
+        <input id="number" name="number" placeholder="+919999900000" required>
+        <div class="hint">The number callers dial, in E.164 format.</div>
+      </div>
+    </div>
+    <label for="allowed">Allowed addresses (optional)</label>
+    <input id="allowed" name="allowed" placeholder="203.0.113.10, 198.51.100.0/24">
+    <div class="hint">Leave empty to accept calls from any address. Restrict this before using a real number.</div>
+    <p><button type="submit">Create trunk</button></p>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Existing trunks</h2>
+  {% if trunks %}
+  <table>
+    <tr><th>Name</th><th>Number</th><th>Allowed</th><th></th></tr>
+    {% for t in trunks %}
+    <tr>
+      <td>{{ t.name }}<div class="hint">{{ t.id }}</div></td>
+      <td>{{ t.numbers | join(", ") }}</td>
+      <td>{{ t.allowed | join(", ") if t.allowed else "any" }}</td>
+      <td>
+        <form method="post" action="/trunks/{{ t.id }}/delete" class="inline" onsubmit="return confirm('Delete this trunk?');">
+          <button class="danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="hint">No trunks yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

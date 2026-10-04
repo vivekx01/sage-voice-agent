@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Overview</h1>
+
+{% if error %}
+<div class="notice error">Could not reach the LiveKit server: {{ error }}</div>
+{% endif %}
+
+<div class="card">
+  <h2>Inbound trunks</h2>
+  {% if trunks %}
+  <table>
+    <tr><th>Name</th><th>Number</th><th>Allowed addresses</th></tr>
+    {% for t in trunks %}
+    <tr><td>{{ t.name }}</td><td>{{ t.numbers | join(", ") }}</td><td>{{ t.allowed | join(", ") if t.allowed else "any" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="hint">No trunks yet. Add one on the Trunks page.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Dispatch rules</h2>
+  {% if rules %}
+  <table>
+    <tr><th>Name</th><th>Agents</th></tr>
+    {% for r in rules %}
+    <tr><td>{{ r.name }}</td><td>{{ r.agents | join(", ") }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="hint">No dispatch rules yet. Add one on the Dispatch rules page.</p>
+  {% endif %}
+</div>
+{% endblock %}
