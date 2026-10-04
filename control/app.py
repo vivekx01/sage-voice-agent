@@ -318,6 +318,7 @@ async def rules_context(request: Request) -> dict:
         "trunks": trunks,
         "error": rule_error or trunk_error,
         "overlap_warning": overlap,
+        "default_agent": AGENT_NAME,
         "user": request.session["user"],
     }
 
@@ -343,16 +344,31 @@ async def rule_edit_page(request: Request, rule_id: str):
     )
 
 
+def parse_agents(raw: str) -> list[str]:
+    """Turn 'sage, sage2' into ['sage', 'sage2'], dropping blanks and duplicates."""
+    names: list[str] = []
+    for part in raw.split(","):
+        name = part.strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
 @app.post("/rules")
 async def create_rule(
     request: Request,
     name: str = Form(...),
     room_prefix: str = Form(ROOM_PREFIX),
+    agents: str = Form(AGENT_NAME),
     trunk_ids: list[str] = Form([]),
 ):
     require_login(request)
     prefix = room_prefix.strip() or ROOM_PREFIX
     selected = [t for t in trunk_ids if t]
+    agent_names = parse_agents(agents)
+    if not agent_names:
+        request.session["flash"] = {"kind": "error", "text": "Enter at least one agent name, such as sage."}
+        return RedirectResponse("/rules", status_code=303)
 
     async def action():
         async with lk_client() as lk:
@@ -363,12 +379,16 @@ async def create_rule(
                     rule=api.SIPDispatchRule(
                         dispatch_rule_individual=api.SIPDispatchRuleIndividual(room_prefix=prefix),
                     ),
-                    room_config=api.RoomConfiguration(agents=[api.RoomAgentDispatch(agent_name=AGENT_NAME)]),
+                    room_config=api.RoomConfiguration(
+                        agents=[api.RoomAgentDispatch(agent_name=a) for a in agent_names],
+                    ),
                 )
             )
 
     scope = f"{len(selected)} trunk(s)" if selected else "all trunks"
-    return await lk_action(request, "/rules", action, f"Dispatch rule created for {scope}.")
+    return await lk_action(
+        request, "/rules", action, f"Dispatch rule created for {scope}, dispatching {', '.join(agent_names)}."
+    )
 
 
 @app.post("/rules/{rule_id}/edit")
@@ -377,26 +397,39 @@ async def update_rule(
     rule_id: str,
     name: str = Form(...),
     room_prefix: str = Form(ROOM_PREFIX),
+    agents: str = Form(AGENT_NAME),
     trunk_ids: list[str] = Form([]),
 ):
     require_login(request)
     prefix = room_prefix.strip() or ROOM_PREFIX
     selected = [t for t in trunk_ids if t]
-    existing = await fetch_rule(rule_id)
-    current = existing["trunk_ids"] if existing else []
+    agent_names = parse_agents(agents)
+    if not agent_names:
+        request.session["flash"] = {"kind": "error", "text": "Enter at least one agent name, such as sage."}
+        return RedirectResponse("/rules", status_code=303)
 
     async def action():
         async with lk_client() as lk:
-            await lk.sip.update_dispatch_rule_fields(
-                rule_id,
-                name=name.strip(),
-                trunk_ids=list_update(current, selected),
-                rule=api.SIPDispatchRule(
-                    dispatch_rule_individual=api.SIPDispatchRuleIndividual(room_prefix=prefix),
-                ),
+            # Replace the whole rule. LiveKit doesn't let us change the agent list on its own,
+            # so read the current rule, change the parts we need, and write it back.
+            items = (await lk.sip.list_dispatch_rule(api.ListSIPDispatchRuleRequest())).items
+            raw = next((x for x in items if x.sip_dispatch_rule_id == rule_id), None)
+            if raw is None:
+                raise ValueError("That rule no longer exists.")
+            raw.name = name.strip()
+            raw.rule.CopyFrom(
+                api.SIPDispatchRule(dispatch_rule_individual=api.SIPDispatchRuleIndividual(room_prefix=prefix))
             )
+            del raw.trunk_ids[:]
+            raw.trunk_ids.extend(selected)
+            del raw.room_config.agents[:]
+            for agent_name in agent_names:
+                raw.room_config.agents.add(agent_name=agent_name)
+            await lk.sip.update_dispatch_rule(rule_id, raw)
 
-    return await lk_action(request, "/rules", action, "Dispatch rule updated.")
+    return await lk_action(
+        request, "/rules", action, f"Dispatch rule updated. Agents: {', '.join(agent_names)}."
+    )
 
 
 @app.post("/rules/{rule_id}/delete")

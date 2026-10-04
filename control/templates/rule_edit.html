@@ -16,6 +16,10 @@
       </div>
     </div>
 
+    <label for="agents">Agents to dispatch</label>
+    <input id="agents" name="agents" value="{{ rule.agents | join(', ') }}" required>
+    <div class="hint">Comma-separated agent names. Each must match an agent that is running and registered.</div>
+
     <label>Trunks this rule applies to</label>
     {% for t in trunks %}
     <label style="font-weight:400;display:flex;gap:8px;align-items:center;margin:6px 0;">

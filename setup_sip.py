@@ -4,6 +4,7 @@ Usage:
     uv run python setup_sip.py list
     uv run python setup_sip.py dispatch
     uv run python setup_sip.py dispatch --trunk <trunk-id>
+    uv run python setup_sip.py dispatch --trunk <trunk-id> --agent sage,sage2
     uv run python setup_sip.py trunk +1XXXXXXXXXX
 
 Reads LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET from .env.
@@ -33,7 +34,7 @@ def client() -> api.LiveKitAPI:
     )
 
 
-async def create_dispatch_rule(lkapi: api.LiveKitAPI, trunk_ids: list[str]) -> None:
+async def create_dispatch_rule(lkapi: api.LiveKitAPI, trunk_ids: list[str], agent_names: list[str]) -> None:
     rule = await lkapi.sip.create_dispatch_rule(
         api.CreateSIPDispatchRuleRequest(
             name=DISPATCH_NAME,
@@ -42,12 +43,22 @@ async def create_dispatch_rule(lkapi: api.LiveKitAPI, trunk_ids: list[str]) -> N
                 dispatch_rule_individual=api.SIPDispatchRuleIndividual(room_prefix=ROOM_PREFIX),
             ),
             room_config=api.RoomConfiguration(
-                agents=[api.RoomAgentDispatch(agent_name=AGENT_NAME)],
+                agents=[api.RoomAgentDispatch(agent_name=a) for a in agent_names],
             ),
         )
     )
     scope = ", ".join(trunk_ids) if trunk_ids else "all trunks"
-    print(f"Created dispatch rule: {rule.sip_dispatch_rule_id} ({rule.name}) for {scope}")
+    print(f"Created dispatch rule: {rule.sip_dispatch_rule_id} ({rule.name}) for {scope}, agents: {', '.join(agent_names)}")
+
+
+def option_value(flag: str) -> str | None:
+    """Return the value after a flag such as --trunk, or None if the flag is absent."""
+    if flag not in sys.argv:
+        return None
+    i = sys.argv.index(flag)
+    if i + 1 >= len(sys.argv):
+        raise SystemExit(f"{flag} needs a value")
+    return sys.argv[i + 1]
 
 
 async def create_inbound_trunk(lkapi: api.LiveKitAPI, number: str) -> None:
@@ -90,14 +101,11 @@ async def main() -> None:
         if command == "list":
             await list_all(lkapi)
         elif command == "dispatch":
-            trunk_ids = []
-            if "--trunk" in sys.argv:
-                i = sys.argv.index("--trunk")
-                if i + 1 >= len(sys.argv):
-                    print("Usage: setup_sip.py dispatch [--trunk <trunk-id>]")
-                    return
-                trunk_ids = [sys.argv[i + 1]]
-            await create_dispatch_rule(lkapi, trunk_ids)
+            trunk = option_value("--trunk")
+            agents = option_value("--agent") or AGENT_NAME
+            trunk_ids = [trunk] if trunk else []
+            agent_names = [a.strip() for a in agents.split(",") if a.strip()]
+            await create_dispatch_rule(lkapi, trunk_ids, agent_names)
         elif command == "trunk":
             if len(sys.argv) < 3:
                 print("Usage: setup_sip.py trunk +1XXXXXXXXXX")
